@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import math
+import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
@@ -704,7 +705,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    host = "127.0.0.1"
-    port = 8767
+    host = "0.0.0.0"
+    port = int(os.environ.get("PORT", 8767))
     print(f"Polymate V12 server running on http://{host}:{port}")
     HTTPServer((host, port), Handler).serve_forever()
