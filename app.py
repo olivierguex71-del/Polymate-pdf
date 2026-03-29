@@ -1,39 +1,25 @@
 #!/usr/bin/env python3
 import json
-import math
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from pathlib import Path
-from urllib.parse import urlparse
 
 from jinja2 import Template
 from weasyprint import HTML
 
-ROOT = Path(__file__).resolve().parent
-
-# =========================
-# THEMES
-# =========================
 THEMES = {
     "cabinet": {
         "name": "Cabinet",
         "accent": "#8FC819",
-        "accent2": "#68B5FF",
-        "soft": "#F7F9FC",
-        "ink": "#132033",
     }
 }
 
-# =========================
-# TEMPLATE HTML PDF
-# =========================
 PDF_TEMPLATE = Template("""
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-body { font-family: Arial; font-size: 12px; }
+body { font-family: Arial, sans-serif; font-size: 12px; }
 h1 { color: {{ theme.accent }}; }
 </style>
 </head>
@@ -47,66 +33,72 @@ h1 { color: {{ theme.accent }}; }
 </html>
 """)
 
-# =========================
-# BUILD PDF
-# =========================
 def build_pdf(payload):
     theme = THEMES.get(payload.get("theme", "cabinet"), THEMES["cabinet"])
-
     html = PDF_TEMPLATE.render(
         theme=theme,
         meta=payload.get("meta", {}),
         scores=payload.get("scores", {}),
-        summary_html=payload.get("summary_html", "")
+        summary_html=payload.get("summary_html") or payload.get("summary", "")
     )
-
     return HTML(string=html).write_pdf()
 
-# =========================
-# HTTP HANDLER
-# =========================
 class Handler(BaseHTTPRequestHandler):
+    def _set_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._set_cors_headers()
+        self.end_headers()
 
     def do_GET(self):
         if self.path == "/":
             self.send_response(200)
-            self.send_header("Content-type", "text/plain")
+            self._set_cors_headers()
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
             self.wfile.write(b"Polymate PDF server running")
-        else:
-            self.send_response(404)
-            self.end_headers()
+            return
+
+        self.send_response(404)
+        self._set_cors_headers()
+        self.end_headers()
 
     def do_POST(self):
-        if self.path == "/generate-pdf":
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length)
-
-            try:
-                payload = json.loads(body.decode("utf-8"))
-                pdf = build_pdf(payload)
-
-                self.send_response(200)
-                self.send_header("Content-Type", "application/pdf")
-                self.send_header("Content-Disposition", "attachment; filename=rapport.pdf")
-                self.end_headers()
-                self.wfile.write(pdf)
-
-            except Exception as e:
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(str(e).encode())
-
-        else:
+        if self.path != "/generate-pdf":
             self.send_response(404)
+            self._set_cors_headers()
             self.end_headers()
+            return
 
-# =========================
-# MAIN (CRITIQUE POUR RENDER)
-# =========================
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            payload = json.loads(body.decode("utf-8"))
+            pdf = build_pdf(payload)
+
+            self.send_response(200)
+            self._set_cors_headers()
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", 'attachment; filename="rapport.pdf"')
+            self.send_header("Content-Length", str(len(pdf)))
+            self.end_headers()
+            self.wfile.write(pdf)
+
+        except Exception as e:
+            error_payload = json.dumps({"error": str(e)}).encode("utf-8")
+            self.send_response(500)
+            self._set_cors_headers()
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(error_payload)))
+            self.end_headers()
+            self.wfile.write(error_payload)
+
 if __name__ == "__main__":
     host = "0.0.0.0"
     port = int(os.environ.get("PORT", 8767))
-
     print(f"Server running on {host}:{port}")
     HTTPServer((host, port), Handler).serve_forever()
